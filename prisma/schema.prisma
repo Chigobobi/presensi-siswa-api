@@ -1,0 +1,235 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  KETUA_KELAS
+  GURU_PIKET
+  ADMIN
+}
+
+enum ActiveStatus {
+  active
+  inactive
+}
+
+enum AttendanceStatus {
+  HADIR
+  TERLAMBAT
+  IZIN
+  SAKIT
+  ALPA
+}
+
+enum AttendanceSession {
+  PAGI
+  SIANG
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  nama         String
+  passwordHash String       @map("password_hash")
+  role         Role
+  status       ActiveStatus @default(active)
+  kelasId      String?      @unique @map("kelas_id")
+
+  kelasAsLeader        Class?                   @relation("ClassLeader", fields: [kelasId], references: [id], onDelete: SetNull)
+  sessions             Session[]
+  attendanceCreated    Attendance[]             @relation("AttendanceCreatedBy")
+  attendanceUpdated    Attendance[]             @relation("AttendanceUpdatedBy")
+  permissionsGranted   AttendancePermission[]   @relation("PermissionGrantedBy")
+  permissionsUsed      AttendancePermission[]   @relation("PermissionUsedBy")
+  auditLogs            AuditLog[]
+  schedulesUpdated     Schedule[]               @relation("ScheduleUpdatedBy")
+  sickLettersUploaded  SickLetter[]             @relation("SickLetterUploadedBy")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([role, status])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  userAgent String?  @map("user_agent")
+  ipAddress String?  @map("ip_address")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Teacher {
+  id        String       @id @default(cuid())
+  nip       String       @unique
+  nama      String
+  status    ActiveStatus @default(active)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("teachers")
+}
+
+model Student {
+  id        String       @id @default(cuid())
+  nis       String       @unique
+  nama      String
+  kelasId   String       @map("kelas_id")
+  status    ActiveStatus @default(active)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  kelas       Class                  @relation(fields: [kelasId], references: [id], onDelete: Restrict)
+  attendances Attendance[]
+  permissions AttendancePermission[]
+  sickLetters SickLetter[]
+
+  @@index([kelasId, status])
+  @@index([status])
+  @@map("students")
+}
+
+model Class {
+  id        String       @id @default(cuid())
+  nama      String       @unique
+  jurusan   String
+  status    ActiveStatus @default(active)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  leader      User?                  @relation("ClassLeader")
+  students    Student[]
+  attendances Attendance[]
+  permissions AttendancePermission[]
+  sickLetters SickLetter[]
+
+  @@index([status])
+  @@map("classes")
+}
+
+model Attendance {
+  id         String           @id @default(cuid())
+  date       DateTime         @db.Date
+  kelasId    String           @map("kelas_id")
+  studentId  String           @map("student_id")
+  status     AttendanceStatus
+  waktu      String?
+  keterangan String           @default("")
+  createdById String          @map("created_by_id")
+  updatedById String          @map("updated_by_id")
+  createdAt  DateTime         @default(now()) @map("created_at")
+  updatedAt  DateTime         @updatedAt @map("updated_at")
+
+  kelas     Class   @relation(fields: [kelasId], references: [id], onDelete: Restrict)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  createdBy User    @relation("AttendanceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy User    @relation("AttendanceUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@unique([date, kelasId, studentId])
+  @@index([kelasId, date])
+  @@index([studentId, date])
+  @@index([date])
+  @@map("attendances")
+}
+
+model AttendancePermission {
+  id          String    @id @default(cuid())
+  date        DateTime  @db.Date
+  kelasId     String    @map("kelas_id")
+  studentId   String    @map("student_id")
+  grantedById String    @map("granted_by_id")
+  grantedAt   DateTime  @default(now()) @map("granted_at")
+  usedAt      DateTime? @map("used_at")
+  usedById    String?   @map("used_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  kelas     Class   @relation(fields: [kelasId], references: [id], onDelete: Cascade)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  grantedBy User    @relation("PermissionGrantedBy", fields: [grantedById], references: [id], onDelete: Restrict)
+  usedBy    User?   @relation("PermissionUsedBy", fields: [usedById], references: [id], onDelete: SetNull)
+
+  @@unique([date, kelasId, studentId])
+  @@index([date, kelasId])
+  @@index([usedAt])
+  @@map("attendance_permissions")
+}
+
+model Schedule {
+  id          String            @id @default(cuid())
+  session     AttendanceSession @unique
+  mulai       String
+  selesai     String
+  terkunci    Boolean           @default(false)
+  updatedById String?           @map("updated_by_id")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  updatedBy User? @relation("ScheduleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("schedules")
+}
+
+model SickLetter {
+  id           String   @id @default(cuid())
+  date         DateTime @db.Date
+  kelasId      String   @map("kelas_id")
+  studentId    String   @map("student_id")
+  keterangan   String
+  fileName     String   @map("file_name")
+  filePath     String   @map("file_path")
+  fileSize     Int      @map("file_size")
+  mimeType     String   @map("mime_type")
+  uploadedById String   @map("uploaded_by_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  uploadedBy User    @relation("SickLetterUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+  kelas      Class   @relation(fields: [kelasId], references: [id], onDelete: Cascade)
+  student    Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([date, kelasId])
+  @@index([studentId])
+  @@map("sick_letters")
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  actorId    String?     @map("actor_id")
+  action     String
+  objectType String      @map("object_type")
+  objectId   String?     @map("object_id")
+  result     AuditResult
+  metadata   Json?
+  requestId  String?     @map("request_id")
+  ipAddress  String?     @map("ip_address")
+  userAgent  String?     @map("user_agent")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([objectType, objectId])
+  @@index([action, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

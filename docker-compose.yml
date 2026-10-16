@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: presensi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: presensi
+      POSTGRES_PASSWORD: presensi_dev_password
+      POSTGRES_DB: presensi_dev
+      TZ: Asia/Jakarta
+      PGTZ: Asia/Jakarta
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U presensi -d presensi_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - presensi-network
+
+  # Opsional: pgAdmin untuk lihat database via browser
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: presensi-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@presensi.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - presensi-network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+  pgadmin_data:
+
+networks:
+  presensi-network:
+    driver: bridge
