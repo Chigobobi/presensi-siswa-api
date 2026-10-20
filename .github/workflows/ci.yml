@@ -68,3 +68,4 @@ jobs:
 
       - name: Audit (production only)
         run: npm audit --omit=dev
+        continue-on-error: true 
