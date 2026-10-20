@@ -45,21 +45,37 @@ model User {
   status       ActiveStatus @default(active)
   kelasId      String?      @unique @map("kelas_id")
 
-  kelasAsLeader        Class?                   @relation("ClassLeader", fields: [kelasId], references: [id], onDelete: SetNull)
-  sessions             Session[]
-  attendanceCreated    Attendance[]             @relation("AttendanceCreatedBy")
-  attendanceUpdated    Attendance[]             @relation("AttendanceUpdatedBy")
-  permissionsGranted   AttendancePermission[]   @relation("PermissionGrantedBy")
-  permissionsUsed      AttendancePermission[]   @relation("PermissionUsedBy")
-  auditLogs            AuditLog[]
-  schedulesUpdated     Schedule[]               @relation("ScheduleUpdatedBy")
-  sickLettersUploaded  SickLetter[]             @relation("SickLetterUploadedBy")
+  kelasAsLeader       Class?                 @relation("ClassLeader", fields: [kelasId], references: [id], onDelete: SetNull)
+  sessions            Session[]
+  attendanceCreated   Attendance[]           @relation("AttendanceCreatedBy")
+  attendanceUpdated   Attendance[]           @relation("AttendanceUpdatedBy")
+  permissionsGranted  AttendancePermission[] @relation("PermissionGrantedBy")
+  permissionsUsed     AttendancePermission[] @relation("PermissionUsedBy")
+  auditLogs           AuditLog[]
+  schedulesUpdated    Schedule[]             @relation("ScheduleUpdatedBy")
+  sickLettersUploaded SickLetter[]           @relation("SickLetterUploadedBy")
+  passwordResetTokens PasswordResetToken[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([role, status])
   @@map("users")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 model Session {
@@ -128,17 +144,17 @@ model Class {
 }
 
 model Attendance {
-  id         String           @id @default(cuid())
-  date       DateTime         @db.Date
-  kelasId    String           @map("kelas_id")
-  studentId  String           @map("student_id")
-  status     AttendanceStatus
-  waktu      String?
-  keterangan String           @default("")
-  createdById String          @map("created_by_id")
-  updatedById String          @map("updated_by_id")
-  createdAt  DateTime         @default(now()) @map("created_at")
-  updatedAt  DateTime         @updatedAt @map("updated_at")
+  id          String           @id @default(cuid())
+  date        DateTime         @db.Date
+  kelasId     String           @map("kelas_id")
+  studentId   String           @map("student_id")
+  status      AttendanceStatus
+  waktu       String?
+  keterangan  String           @default("")
+  createdById String           @map("created_by_id")
+  updatedById String           @map("updated_by_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
 
   kelas     Class   @relation(fields: [kelasId], references: [id], onDelete: Restrict)
   student   Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
