@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import configuration from './config/configuration';
@@ -12,6 +13,9 @@ import { StudentsModule } from './modules/students/students.module';
 import { TeachersModule } from './modules/teachers/teachers.module';
 import { ClassesModule } from './modules/classes/classes.module';
 import { UsersModule } from './modules/users/users.module';
+import { AttendanceModule } from './modules/attendance/attendance.module';
+import { SchedulesModule } from './modules/schedules/schedules.module';
+import { MonitoringModule } from './modules/monitoring/monitoring.module';
 
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
@@ -27,6 +31,7 @@ import { RolesGuard } from './common/guards/roles.guard';
       envFilePath: ['.env.local', '.env'],
       cache: true,
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     HealthModule,
     AuthModule,
@@ -34,6 +39,9 @@ import { RolesGuard } from './common/guards/roles.guard';
     TeachersModule,
     ClassesModule,
     UsersModule,
+    SchedulesModule,
+    AttendanceModule,
+    MonitoringModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
