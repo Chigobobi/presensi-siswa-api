@@ -14,8 +14,7 @@ export class AttendanceRetentionController {
 
   @Post('purge')
   @ApiOperation({
-    summary:
-      'Bersihkan presensi semester lama (Admin). Aturan: simpan 2 semester terakhir.',
+    summary: 'Bersihkan presensi semester lama (Admin). Aturan: simpan 2 semester terakhir.',
   })
   async purge(@Body() dto: PurgeAttendanceDto) {
     if (dto.dryRun ?? true) {

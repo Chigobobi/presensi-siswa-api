@@ -62,9 +62,7 @@ export class RolesGuard implements CanActivate {
 
     // Belum login
     if (!user) {
-      this.logger.warn(
-        `[RolesGuard] No user on ${method} ${url} (ditolak)`,
-      );
+      this.logger.warn(`[RolesGuard] No user on ${method} ${url} (ditolak)`);
       throw new ForbiddenException({
         code: 'FORBIDDEN',
         message: 'Akses ditolak.',

@@ -5,17 +5,27 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ActiveStatus, Role } from '@prisma/client';
+import { ActiveStatus, AuditResult, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { SessionUser } from '../../common/types/session-user.type';
+import { AuditService } from '../audit/audit.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUserDto } from './dto/query-user.dto';
 
+interface AuditCtx {
+  requestId?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   private assertAdmin(user: SessionUser) {
     if (user.role !== Role.ADMIN) {
@@ -26,7 +36,31 @@ export class UsersService {
     }
   }
 
-  private async assertKelasForRole(role: Role, kelasId: string | null | undefined) {
+  private async log(
+    user: SessionUser,
+    ctx: AuditCtx,
+    action: string,
+    objectId: string | null,
+    metadata: Record<string, unknown>,
+  ) {
+    await this.audit.log({
+      actorId: user.id,
+      action,
+      objectType: 'User',
+      objectId,
+      result: AuditResult.SUCCESS,
+      metadata,
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+  }
+
+  private async assertKelasForRole(
+    role: Role,
+    kelasId: string | null | undefined,
+    excludeId?: string,
+  ) {
     if (role === Role.KETUA_KELAS) {
       if (!kelasId) {
         throw new BadRequestException({
@@ -43,8 +77,21 @@ export class UsersService {
           fieldErrors: { kelasId: 'Kelas tidak valid.' },
         });
       }
+      const existing = await this.prisma.user.findFirst({
+        where: {
+          kelasId,
+          role: Role.KETUA_KELAS,
+          ...(excludeId ? { id: { not: excludeId } } : {}),
+        },
+      });
+      if (existing) {
+        throw new ConflictException({
+          code: 'CONFLICT',
+          message: 'Kelas ini sudah memiliki akun Ketua Kelas.',
+          fieldErrors: { kelasId: 'Kelas ini sudah punya Ketua Kelas.' },
+        });
+      }
     } else {
-      // Admin & Guru Piket tidak punya kelas
       if (kelasId) {
         throw new BadRequestException({
           code: 'VALIDATION_ERROR',
@@ -128,10 +175,11 @@ export class UsersService {
     return account;
   }
 
-  async create(dto: CreateUserDto, user: SessionUser) {
+  async create(dto: CreateUserDto, user: SessionUser, ctx: AuditCtx = {}) {
     this.assertAdmin(user);
 
-    await this.assertKelasForRole(dto.role, dto.kelasId ?? null);
+    const kelasId = dto.role === Role.KETUA_KELAS ? (dto.kelasId ?? null) : null;
+    await this.assertKelasForRole(dto.role, kelasId);
 
     const email = dto.email.toLowerCase().trim();
     const existing = await this.prisma.user.findUnique({ where: { email } });
@@ -146,40 +194,37 @@ export class UsersService {
     const rounds = parseInt(process.env.BCRYPT_ROUNDS ?? '12', 10);
     const passwordHash = await bcrypt.hash(dto.password, rounds);
 
-    try {
-      return await this.prisma.user.create({
-        data: {
-          nama: dto.nama,
-          email,
-          passwordHash,
-          role: dto.role,
-          kelasId: dto.role === Role.KETUA_KELAS ? dto.kelasId! : null,
-          status: ActiveStatus.active,
-        },
-        select: {
-          id: true,
-          nama: true,
-          email: true,
-          role: true,
-          status: true,
-          kelasId: true,
-          createdAt: true,
-        },
-      });
-    } catch (e: any) {
-      // Prisma unique error (kelasId unik → 1 kelas 1 ketua)
-      if (e?.code === 'P2002') {
-        throw new ConflictException({
-          code: 'CONFLICT',
-          message: 'Kelas ini sudah memiliki akun Ketua Kelas.',
-          fieldErrors: { kelasId: 'Kelas ini sudah punya Ketua Kelas.' },
-        });
-      }
-      throw e;
-    }
+    const created = await this.prisma.user.create({
+      data: {
+        nama: dto.nama,
+        email,
+        passwordHash,
+        role: dto.role,
+        kelasId,
+        status: ActiveStatus.active,
+      },
+      select: {
+        id: true,
+        nama: true,
+        email: true,
+        role: true,
+        status: true,
+        kelasId: true,
+        createdAt: true,
+      },
+    });
+
+    await this.log(user, ctx, 'user.create', created.id, {
+      nama: created.nama,
+      email: created.email,
+      role: created.role,
+      kelasId: created.kelasId,
+    });
+
+    return created;
   }
 
-  async update(id: string, dto: UpdateUserDto, user: SessionUser) {
+  async update(id: string, dto: UpdateUserDto, user: SessionUser, ctx: AuditCtx = {}) {
     this.assertAdmin(user);
 
     const account = await this.prisma.user.findUnique({ where: { id } });
@@ -191,10 +236,9 @@ export class UsersService {
     }
 
     const role = dto.role ?? account.role;
-    const kelasId =
-      role === Role.KETUA_KELAS ? (dto.kelasId ?? account.kelasId) : null;
+    const kelasId = role === Role.KETUA_KELAS ? (dto.kelasId ?? account.kelasId) : null;
 
-    await this.assertKelasForRole(role, kelasId);
+    await this.assertKelasForRole(role, kelasId, id);
 
     if (dto.email && dto.email.toLowerCase() !== account.email) {
       const dup = await this.prisma.user.findUnique({
@@ -213,42 +257,43 @@ export class UsersService {
       ...(dto.nama !== undefined ? { nama: dto.nama } : {}),
       ...(dto.email !== undefined ? { email: dto.email.toLowerCase() } : {}),
       ...(dto.role !== undefined ? { role: dto.role } : {}),
-      kelasId,
+      ...(dto.kelasId !== undefined || dto.role !== undefined ? { kelasId } : {}),
     };
 
-    if (dto.password) {
-      const rounds = parseInt(process.env.BCRYPT_ROUNDS ?? '12', 10);
-      data.passwordHash = await bcrypt.hash(dto.password, rounds);
-    }
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        nama: true,
+        email: true,
+        role: true,
+        status: true,
+        kelasId: true,
+        updatedAt: true,
+      },
+    });
 
-    try {
-      return await this.prisma.user.update({
-        where: { id },
-        data,
-        select: {
-          id: true,
-          nama: true,
-          email: true,
-          role: true,
-          status: true,
-          kelasId: true,
-          updatedAt: true,
-        },
-      });
-    } catch (e: any) {
-      if (e?.code === 'P2002') {
-        throw new ConflictException({
-          code: 'CONFLICT',
-          message: 'Kelas ini sudah memiliki akun Ketua Kelas.',
-          fieldErrors: { kelasId: 'Kelas ini sudah punya Ketua Kelas.' },
-        });
-      }
-      throw e;
-    }
+    await this.log(user, ctx, 'user.update', id, {
+      nama: updated.nama,
+      email: updated.email,
+      role: updated.role,
+      kelasId: updated.kelasId,
+      changes: dto,
+    });
+
+    return updated;
   }
 
-  async setActive(id: string, active: boolean, user: SessionUser) {
+  async setActive(id: string, active: boolean, user: SessionUser, ctx: AuditCtx = {}) {
     this.assertAdmin(user);
+
+    if (id === user.id && !active) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Anda tidak dapat menonaktifkan akun sendiri.',
+      });
+    }
 
     const account = await this.prisma.user.findUnique({ where: { id } });
     if (!account) {
@@ -258,15 +303,7 @@ export class UsersService {
       });
     }
 
-    // Jangan nonaktifkan diri sendiri
-    if (id === user.id && !active) {
-      throw new BadRequestException({
-        code: 'VALIDATION_ERROR',
-        message: 'Anda tidak dapat menonaktifkan akun Anda sendiri.',
-      });
-    }
-
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: { status: active ? ActiveStatus.active : ActiveStatus.inactive },
       select: {
@@ -276,17 +313,25 @@ export class UsersService {
         role: true,
         status: true,
         kelasId: true,
+        updatedAt: true,
       },
     });
+
+    await this.log(user, ctx, active ? 'user.activate' : 'user.deactivate', id, {
+      nama: account.nama,
+      email: account.email,
+    });
+
+    return updated;
   }
 
-  async remove(id: string, user: SessionUser) {
+  async remove(id: string, user: SessionUser, ctx: AuditCtx = {}) {
     this.assertAdmin(user);
 
     if (id === user.id) {
       throw new BadRequestException({
         code: 'VALIDATION_ERROR',
-        message: 'Anda tidak dapat menghapus akun Anda sendiri.',
+        message: 'Anda tidak dapat menghapus akun sendiri.',
       });
     }
 
@@ -299,6 +344,13 @@ export class UsersService {
     }
 
     await this.prisma.user.delete({ where: { id } });
+
+    await this.log(user, ctx, 'user.delete', id, {
+      nama: account.nama,
+      email: account.email,
+      role: account.role,
+    });
+
     return { deleted: true, id };
   }
 }

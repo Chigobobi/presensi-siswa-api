@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 
 export class QueryPermissionDto {
   @ApiPropertyOptional()
@@ -14,7 +14,7 @@ export class QueryPermissionDto {
 
   @ApiPropertyOptional({ example: '2026-10-16' })
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  @IsString()
   date?: string;
 
   @ApiPropertyOptional({ enum: ['all', 'used', 'unused'], default: 'all' })

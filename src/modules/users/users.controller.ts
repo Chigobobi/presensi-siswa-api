@@ -14,9 +14,9 @@ import {
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ReqContext, type RequestContext } from '../../common/decorators/request-context.decorator';
 import type { SessionUser } from '../../common/types/session-user.type';
 import { UsersService } from './users.service';
-import { PasswordResetService } from './password-reset.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -26,10 +26,7 @@ import { QueryUserDto } from './dto/query-user.dto';
 @UseGuards(AuthGuard)
 @Controller('users')
 export class UsersController {
-  constructor(
-    private readonly usersService: UsersService,
-    private readonly passwordResetService: PasswordResetService,
-  ) {}
+  constructor(private readonly usersService: UsersService) {}
 
   @Get()
   @ApiOperation({ summary: 'List akun (Admin)' })
@@ -45,8 +42,12 @@ export class UsersController {
 
   @Post()
   @ApiOperation({ summary: 'Tambah akun (Admin)' })
-  create(@Body() dto: CreateUserDto, @CurrentUser() user: SessionUser) {
-    return this.usersService.create(dto, user);
+  create(
+    @Body() dto: CreateUserDto,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.usersService.create(dto, user, ctx);
   }
 
   @Patch(':id')
@@ -55,41 +56,40 @@ export class UsersController {
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
     @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
   ) {
-    return this.usersService.update(id, dto, user);
+    return this.usersService.update(id, dto, user, ctx);
   }
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Nonaktifkan akun (Admin)' })
-  deactivate(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.usersService.setActive(id, false, user);
+  deactivate(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.usersService.setActive(id, false, user, ctx);
   }
 
   @Post(':id/activate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Aktifkan akun (Admin)' })
-  activate(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.usersService.setActive(id, true, user);
+  activate(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.usersService.setActive(id, true, user, ctx);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Hapus akun permanen (Admin)' })
-  remove(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.usersService.remove(id, user);
-  }
-
-  @Post(':id/password-reset')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Minta reset password (Admin). Token dikirim via email di prod, di-log di dev.',
-  })
-  async passwordReset(
+  remove(
     @Param('id') id: string,
     @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
   ) {
-    // assert admin di service
-    await this.usersService.findOne(id, user); // trigger admin check + not found
-    return this.passwordResetService.requestReset(id);
+    return this.usersService.remove(id, user, ctx);
   }
 }

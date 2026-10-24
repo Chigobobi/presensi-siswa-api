@@ -14,6 +14,7 @@ import {
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ReqContext, type RequestContext } from '../../common/decorators/request-context.decorator';
 import type { SessionUser } from '../../common/types/session-user.type';
 import { TeachersService } from './teachers.service';
 import { CreateTeacherDto } from './dto/create-teacher.dto';
@@ -41,8 +42,12 @@ export class TeachersController {
 
   @Post()
   @ApiOperation({ summary: 'Tambah guru (Admin)' })
-  create(@Body() dto: CreateTeacherDto, @CurrentUser() user: SessionUser) {
-    return this.teachersService.create(dto, user);
+  create(
+    @Body() dto: CreateTeacherDto,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.teachersService.create(dto, user, ctx);
   }
 
   @Patch(':id')
@@ -51,27 +56,40 @@ export class TeachersController {
     @Param('id') id: string,
     @Body() dto: UpdateTeacherDto,
     @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
   ) {
-    return this.teachersService.update(id, dto, user);
+    return this.teachersService.update(id, dto, user, ctx);
   }
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Nonaktifkan guru (Admin)' })
-  deactivate(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.teachersService.setActive(id, false, user);
+  deactivate(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.teachersService.setActive(id, false, user, ctx);
   }
 
   @Post(':id/activate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Aktifkan guru (Admin)' })
-  activate(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.teachersService.setActive(id, true, user);
+  activate(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.teachersService.setActive(id, true, user, ctx);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Hapus guru permanen (Admin)' })
-  remove(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.teachersService.remove(id, user);
+  remove(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.teachersService.remove(id, user, ctx);
   }
 }

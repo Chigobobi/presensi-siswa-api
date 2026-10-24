@@ -15,10 +15,7 @@ export class MonitoringController {
 
   @Get()
   @ApiOperation({ summary: 'Ringkasan semua kelas (Guru Piket/Admin)' })
-  overview(
-    @Query() query: QueryMonitoringDto,
-    @CurrentUser() user: SessionUser,
-  ) {
+  overview(@Query() query: QueryMonitoringDto, @CurrentUser() user: SessionUser) {
     return this.monitoringService.overview(query, user);
   }
 

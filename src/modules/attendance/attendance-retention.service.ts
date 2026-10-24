@@ -1,163 +1,172 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
+import { AuditResult } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 
-type Semester = 'GANJIL' | 'GENAP';
-
-export interface SemesterInfo {
-  semester: Semester;
-  tahunAjaran: string;
-  start: Date; // inklusif
-  end: Date; // inklusif
+interface SemesterInfo {
+  semester: 'Ganjil' | 'Genap';
+  tahunAjaran: string; // contoh: "2025/2026"
+  startDate: Date;
+  endDate: Date;
 }
 
 /**
- * Retensi berbasis semester:
- * - GANJIL : Juli – Desember (tahun ajaran X/X+1)
- * - GENAP  : Januari – Juni  (tahun ajaran X-1/X)
- *
- * Data yang disimpan: 2 semester terakhir (aktif + selesai bulan lalu).
- * Data sebelum cutoff DIHAPUS.
+ * Service retensi presensi.
+ * Aturan: simpan 2 semester terakhir. Data yang lebih lama dihapus.
+ * 1 semester = 6 bulan (Ganjil: Jul–Des, Genap: Jan–Jun).
  */
 @Injectable()
 export class AttendanceRetentionService {
   private readonly logger = new Logger(AttendanceRetentionService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
-  /** Tentukan semester berdasarkan tanggal */
-  getSemesterInfo(date: Date = new Date()): SemesterInfo {
-    const year = date.getFullYear();
-    const month = date.getMonth() + 1; // 1-12
+  /** Hitung semester aktif berdasarkan tanggal acuan (default: hari ini). */
+  private getSemesterForDate(ref: Date): SemesterInfo {
+    const month = ref.getMonth() + 1; // 1-12
+    const year = ref.getFullYear();
 
     if (month >= 7) {
-      // Juli-Desember → GANJIL tahun ajaran year/year+1
+      // Ganjil: Juli - Desember
       return {
-        semester: 'GANJIL',
+        semester: 'Ganjil',
         tahunAjaran: `${year}/${year + 1}`,
-        start: new Date(Date.UTC(year, 6, 1)), // 1 Juli
-        end: new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999)), // 31 Des
-      };
-    } else {
-      // Januari-Juni → GENAP tahun ajaran year-1/year
-      return {
-        semester: 'GENAP',
-        tahunAjaran: `${year - 1}/${year}`,
-        start: new Date(Date.UTC(year, 0, 1)), // 1 Jan
-        end: new Date(Date.UTC(year, 5, 30, 23, 59, 59, 999)), // 30 Jun
+        startDate: new Date(year, 6, 1), // 1 Juli
+        endDate: new Date(year, 11, 31), // 31 Des
       };
     }
-  }
-
-  /**
-   * Hitung cutoff: data dengan `date < cutoff` akan DIHAPUS.
-   *
-   * Aturan: simpan 2 semester terakhir.
-   * - Kalau sekarang GENAP (Jan-Jun): cutoff = 1 Juli tahun lalu
-   * - Kalau sekarang GANJIL (Jul-Des): cutoff = 1 Januari tahun sekarang
-   */
-  getCutoffDate(now: Date = new Date()): Date {
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
-
-    if (month >= 7) {
-      // Juli-Desember → simpan GANJIL sekarang + GENAP tahun ini
-      // cutoff = 1 Januari tahun ini
-      return new Date(Date.UTC(year, 0, 1));
-    } else {
-      // Januari-Juni → simpan GENAP sekarang + GANJIL tahun lalu
-      // cutoff = 1 Juli tahun lalu
-      return new Date(Date.UTC(year - 1, 6, 1));
-    }
-  }
-
-  /** Hapus presensi & izin sebelum cutoff */
-  async purgeOldAttendances(): Promise<{
-    deleted: number;
-    attendances: number;
-    permissions: number;
-    cutoff: string;
-    currentSemester: SemesterInfo;
-  }> {
-    const cutoff = this.getCutoffDate();
-    const currentSemester = this.getSemesterInfo();
-
-    const [attendanceResult, permissionResult] = await this.prisma.$transaction([
-      this.prisma.attendance.deleteMany({
-        where: { date: { lt: cutoff } },
-      }),
-      this.prisma.attendancePermission.deleteMany({
-        where: { date: { lt: cutoff } },
-      }),
-    ]);
-
-    const total = attendanceResult.count + permissionResult.count;
-    this.logger.log(
-      `[Retensi Semester] Semester aktif: ${currentSemester.semester} ${currentSemester.tahunAjaran}. ` +
-        `Cutoff: ${cutoff.toISOString().slice(0, 10)}. ` +
-        `Dihapus ${attendanceResult.count} presensi + ${permissionResult.count} izin.`,
-    );
-
+    // Genap: Januari - Juni
     return {
-      deleted: total,
-      attendances: attendanceResult.count,
-      permissions: permissionResult.count,
-      cutoff: cutoff.toISOString().slice(0, 10),
-      currentSemester,
+      semester: 'Genap',
+      tahunAjaran: `${year - 1}/${year}`,
+      startDate: new Date(year, 0, 1), // 1 Jan
+      endDate: new Date(year, 5, 30), // 30 Jun
     };
   }
 
-  /** Dry-run: hitung berapa yang akan dihapus, tanpa hapus */
-  async countOldAttendances(): Promise<{
-    attendances: number;
-    permissions: number;
-    cutoff: string;
-    currentSemester: SemesterInfo;
-    retainedSince: string;
-  }> {
+  /**
+   * Hitung cutoff = awal semester N-2 (dua semester sebelum semester aktif).
+   * Data dengan tanggal < cutoff akan dihapus.
+   */
+  private getCutoffDate(ref: Date = new Date()): Date {
+    const current = this.getSemesterForDate(ref);
+
+    // Mundur 2 semester dari awal semester aktif
+    let cutoffYear = current.startDate.getFullYear();
+    let cutoffMonth = current.startDate.getMonth(); // 0-indexed
+
+    // Mundur 12 bulan (2 semester)
+    cutoffMonth -= 12;
+    while (cutoffMonth < 0) {
+      cutoffMonth += 12;
+      cutoffYear -= 1;
+    }
+
+    return new Date(cutoffYear, cutoffMonth, 1);
+  }
+
+  /**
+   * Hitung berapa baris yang akan dihapus (dry-run).
+   * Return shape harus sesuai AttendanceRetentionController:
+   * { currentSemester: { semester, tahunAjaran }, attendances, permissions, retentionDays, cutoff }
+   */
+  async countOldAttendances() {
     const cutoff = this.getCutoffDate();
-    const currentSemester = this.getSemesterInfo();
+    const currentSemester = this.getSemesterForDate(new Date());
 
     const [attendances, permissions] = await this.prisma.$transaction([
       this.prisma.attendance.count({ where: { date: { lt: cutoff } } }),
-      this.prisma.attendancePermission.count({
-        where: { date: { lt: cutoff } },
-      }),
+      this.prisma.attendancePermission.count({ where: { date: { lt: cutoff } } }),
     ]);
 
     return {
+      currentSemester: {
+        semester: currentSemester.semester,
+        tahunAjaran: currentSemester.tahunAjaran,
+      },
       attendances,
       permissions,
-      cutoff: cutoff.toISOString().slice(0, 10),
-      currentSemester,
-      retainedSince: cutoff.toISOString().slice(0, 10),
+      retentionDays: null, // tidak dipakai lagi — cutoff eksplisit
+      cutoff: cutoff.toISOString(),
     };
   }
 
-  /**
-   * Cron: jalan setiap tanggal 1, jam 02:00 WIB.
-   * Pada:
-   * - 1 Juli  → bersihkan data sebelum 1 Januari (setelah semester Genap selesai)
-   * - 1 Januari → bersihkan data sebelum 1 Juli tahun lalu (setelah Ganjil selesai)
-   */
-  @Cron('0 2 1 * *', {
-    name: 'purge-old-attendances',
-    timeZone: 'Asia/Jakarta',
-  })
-  async handleMonthlyPurge(): Promise<void> {
-    this.logger.log(
-      '[Retensi Semester] Mulai pembersihan data semester yang sudah lewat...',
-    );
-    try {
-      const result = await this.purgeOldAttendances();
-      this.logger.log(
-        `[Retensi Semester] Selesai. ${result.deleted} record dihapus (cutoff: ${result.cutoff}).`,
-      );
-    } catch (err) {
-      this.logger.error(
-        '[Retensi Semester] Gagal membersihkan presensi.',
-        err as Error,
-      );
+  /** Hapus presensi + izin lama. Dicatat ke audit. */
+  async purgeOldAttendances(requestId?: string | null) {
+    const cutoff = this.getCutoffDate();
+    const currentSemester = this.getSemesterForDate(new Date());
+
+    const [attendanceCount, permissionCount] = await this.prisma.$transaction([
+      this.prisma.attendance.count({ where: { date: { lt: cutoff } } }),
+      this.prisma.attendancePermission.count({ where: { date: { lt: cutoff } } }),
+    ]);
+
+    if (attendanceCount + permissionCount === 0) {
+      this.logger.log(`Retention purge: tidak ada data sebelum ${cutoff.toISOString()}.`);
+      await this.audit.log({
+        actorId: null,
+        action: 'attendance.retention_purge',
+        objectType: 'Attendance',
+        objectId: null,
+        result: AuditResult.SUCCESS,
+        metadata: {
+          currentSemester,
+          cutoff: cutoff.toISOString(),
+          deletedAttendances: 0,
+          deletedPermissions: 0,
+        },
+        requestId: requestId ?? null,
+        ipAddress: null,
+        userAgent: null,
+      });
+      return {
+        currentSemester: {
+          semester: currentSemester.semester,
+          tahunAjaran: currentSemester.tahunAjaran,
+        },
+        attendances: 0,
+        permissions: 0,
+        cutoff: cutoff.toISOString(),
+      };
     }
+
+    const [deletedAttendances, deletedPermissions] = await this.prisma.$transaction([
+      this.prisma.attendance.deleteMany({ where: { date: { lt: cutoff } } }),
+      this.prisma.attendancePermission.deleteMany({ where: { date: { lt: cutoff } } }),
+    ]);
+
+    this.logger.log(
+      `Retention purge: hapus ${deletedAttendances.count} presensi + ${deletedPermissions.count} izin sebelum ${cutoff.toISOString()}.`,
+    );
+
+    await this.audit.log({
+      actorId: null,
+      action: 'attendance.retention_purge',
+      objectType: 'Attendance',
+      objectId: null,
+      result: AuditResult.SUCCESS,
+      metadata: {
+        currentSemester,
+        cutoff: cutoff.toISOString(),
+        deletedAttendances: deletedAttendances.count,
+        deletedPermissions: deletedPermissions.count,
+      },
+      requestId: requestId ?? null,
+      ipAddress: null,
+      userAgent: null,
+    });
+
+    return {
+      currentSemester: {
+        semester: currentSemester.semester,
+        tahunAjaran: currentSemester.tahunAjaran,
+      },
+      attendances: deletedAttendances.count,
+      permissions: deletedPermissions.count,
+      cutoff: cutoff.toISOString(),
+    };
   }
 }
