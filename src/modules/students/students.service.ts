@@ -5,22 +5,31 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ActiveStatus, Role } from '@prisma/client';
+import { ActiveStatus, AuditResult, Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { SessionUser } from '../../common/types/session-user.type';
+import { AuditService } from '../audit/audit.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { QueryStudentDto } from './dto/query-student.dto';
 
+interface AuditCtx {
+  requestId?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
 @Injectable()
 export class StudentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async findAll(query: QueryStudentDto, user: SessionUser) {
     const { search, kelasId, status = 'all', page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
 
-    // Scope: Ketua Kelas hanya kelas sendiri
     let effectiveKelasId = kelasId;
     if (user.role === Role.KETUA_KELAS) {
       if (!user.kelasId) {
@@ -58,9 +67,7 @@ export class StudentsService {
         skip,
         take: limit,
         orderBy: [{ kelasId: 'asc' }, { nis: 'asc' }],
-        include: {
-          kelas: { select: { id: true, nama: true, jurusan: true } },
-        },
+        include: { kelas: { select: { id: true, nama: true, jurusan: true } } },
       }),
     ]);
 
@@ -76,30 +83,21 @@ export class StudentsService {
   async findOne(id: string, user: SessionUser) {
     const student = await this.prisma.student.findUnique({
       where: { id },
-      include: {
-        kelas: { select: { id: true, nama: true, jurusan: true } },
-      },
+      include: { kelas: { select: { id: true, nama: true, jurusan: true } } },
     });
-
     if (!student) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Siswa tidak ditemukan.',
-      });
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Siswa tidak ditemukan.' });
     }
-
-    // Scope Ketua Kelas
     if (user.role === Role.KETUA_KELAS && student.kelasId !== user.kelasId) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
         message: 'Anda tidak dapat melihat siswa dari kelas lain.',
       });
     }
-
     return student;
   }
 
-  async create(dto: CreateStudentDto, user: SessionUser) {
+  async create(dto: CreateStudentDto, user: SessionUser, ctx: AuditCtx = {}) {
     if (user.role !== Role.ADMIN) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
@@ -107,10 +105,7 @@ export class StudentsService {
       });
     }
 
-    // Validasi kelas ada
-    const kelas = await this.prisma.class.findUnique({
-      where: { id: dto.kelasId },
-    });
+    const kelas = await this.prisma.class.findUnique({ where: { id: dto.kelasId } });
     if (!kelas) {
       throw new BadRequestException({
         code: 'VALIDATION_ERROR',
@@ -119,10 +114,7 @@ export class StudentsService {
       });
     }
 
-    // Cek NIS duplikat
-    const existing = await this.prisma.student.findUnique({
-      where: { nis: dto.nis },
-    });
+    const existing = await this.prisma.student.findUnique({ where: { nis: dto.nis } });
     if (existing) {
       throw new ConflictException({
         code: 'CONFLICT',
@@ -131,20 +123,27 @@ export class StudentsService {
       });
     }
 
-    return this.prisma.student.create({
-      data: {
-        nis: dto.nis,
-        nama: dto.nama,
-        kelasId: dto.kelasId,
-        status: ActiveStatus.active,
-      },
-      include: {
-        kelas: { select: { id: true, nama: true, jurusan: true } },
-      },
+    const student = await this.prisma.student.create({
+      data: { nis: dto.nis, nama: dto.nama, kelasId: dto.kelasId, status: ActiveStatus.active },
+      include: { kelas: { select: { id: true, nama: true, jurusan: true } } },
     });
+
+    await this.audit.log({
+      actorId: user.id,
+      action: 'student.create',
+      objectType: 'Student',
+      objectId: student.id,
+      result: AuditResult.SUCCESS,
+      metadata: { nis: student.nis, nama: student.nama, kelasId: student.kelasId },
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+
+    return student;
   }
 
-  async update(id: string, dto: UpdateStudentDto, user: SessionUser) {
+  async update(id: string, dto: UpdateStudentDto, user: SessionUser, ctx: AuditCtx = {}) {
     if (user.role !== Role.ADMIN) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
@@ -154,17 +153,11 @@ export class StudentsService {
 
     const student = await this.prisma.student.findUnique({ where: { id } });
     if (!student) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Siswa tidak ditemukan.',
-      });
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Siswa tidak ditemukan.' });
     }
 
-    // Cek NIS unik kalau diubah
     if (dto.nis && dto.nis !== student.nis) {
-      const dup = await this.prisma.student.findUnique({
-        where: { nis: dto.nis },
-      });
+      const dup = await this.prisma.student.findUnique({ where: { nis: dto.nis } });
       if (dup) {
         throw new ConflictException({
           code: 'CONFLICT',
@@ -174,11 +167,8 @@ export class StudentsService {
       }
     }
 
-    // Cek kelas valid kalau diubah
     if (dto.kelasId) {
-      const kelas = await this.prisma.class.findUnique({
-        where: { id: dto.kelasId },
-      });
+      const kelas = await this.prisma.class.findUnique({ where: { id: dto.kelasId } });
       if (!kelas) {
         throw new BadRequestException({
           code: 'VALIDATION_ERROR',
@@ -188,16 +178,28 @@ export class StudentsService {
       }
     }
 
-    return this.prisma.student.update({
+    const updated = await this.prisma.student.update({
       where: { id },
       data: dto,
-      include: {
-        kelas: { select: { id: true, nama: true, jurusan: true } },
-      },
+      include: { kelas: { select: { id: true, nama: true, jurusan: true } } },
     });
+
+    await this.audit.log({
+      actorId: user.id,
+      action: 'student.update',
+      objectType: 'Student',
+      objectId: id,
+      result: AuditResult.SUCCESS,
+      metadata: { changes: dto, before: { nis: student.nis, nama: student.nama } },
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+
+    return updated;
   }
 
-  async setActive(id: string, active: boolean, user: SessionUser) {
+  async setActive(id: string, active: boolean, user: SessionUser, ctx: AuditCtx = {}) {
     if (user.role !== Role.ADMIN) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
@@ -207,22 +209,31 @@ export class StudentsService {
 
     const student = await this.prisma.student.findUnique({ where: { id } });
     if (!student) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Siswa tidak ditemukan.',
-      });
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Siswa tidak ditemukan.' });
     }
 
-    return this.prisma.student.update({
+    const updated = await this.prisma.student.update({
       where: { id },
       data: { status: active ? ActiveStatus.active : ActiveStatus.inactive },
-      include: {
-        kelas: { select: { id: true, nama: true, jurusan: true } },
-      },
+      include: { kelas: { select: { id: true, nama: true, jurusan: true } } },
     });
+
+    await this.audit.log({
+      actorId: user.id,
+      action: active ? 'student.activate' : 'student.deactivate',
+      objectType: 'Student',
+      objectId: id,
+      result: AuditResult.SUCCESS,
+      metadata: { nis: student.nis, nama: student.nama },
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+
+    return updated;
   }
 
-  async remove(id: string, user: SessionUser) {
+  async remove(id: string, user: SessionUser, ctx: AuditCtx = {}) {
     if (user.role !== Role.ADMIN) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
@@ -232,29 +243,36 @@ export class StudentsService {
 
     const student = await this.prisma.student.findUnique({ where: { id } });
     if (!student) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Siswa tidak ditemukan.',
-      });
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Siswa tidak ditemukan.' });
     }
 
-    // Cek referensi: kalau siswa punya presensi/izin/surat sakit, tolak hapus permanen
-    const [attendanceCount, permissionCount, sickLetterCount] =
-      await this.prisma.$transaction([
-        this.prisma.attendance.count({ where: { studentId: id } }),
-        this.prisma.attendancePermission.count({ where: { studentId: id } }),
-        this.prisma.sickLetter.count({ where: { studentId: id } }),
-      ]);
+    const [attendanceCount, permissionCount, sickLetterCount] = await this.prisma.$transaction([
+      this.prisma.attendance.count({ where: { studentId: id } }),
+      this.prisma.attendancePermission.count({ where: { studentId: id } }),
+      this.prisma.sickLetter.count({ where: { studentId: id } }),
+    ]);
 
     if (attendanceCount + permissionCount + sickLetterCount > 0) {
       throw new ConflictException({
         code: 'CONFLICT',
-        message:
-          'Siswa memiliki riwayat presensi/izin/surat sakit. Nonaktifkan saja daripada menghapus permanen.',
+        message: 'Siswa memiliki riwayat. Nonaktifkan saja daripada menghapus permanen.',
       });
     }
 
     await this.prisma.student.delete({ where: { id } });
+
+    await this.audit.log({
+      actorId: user.id,
+      action: 'student.delete',
+      objectType: 'Student',
+      objectId: id,
+      result: AuditResult.SUCCESS,
+      metadata: { nis: student.nis, nama: student.nama },
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+
     return { deleted: true, id };
   }
 }

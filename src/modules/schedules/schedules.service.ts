@@ -1,82 +1,60 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { AttendanceSession, Role } from '@prisma/client';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { AuditResult, Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { SessionUser } from '../../common/types/session-user.type';
+import { AuditService } from '../audit/audit.service';
 import { UpdateScheduleDto } from './dto/update-schedule.dto';
-import { parseHHMM } from '../../common/utils/jakarta-time';
+
+interface AuditCtx {
+  requestId?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
 
 @Injectable()
 export class SchedulesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
-  async findAll() {
-    // Semua role boleh baca jadwal
+  private async log(
+    user: SessionUser,
+    ctx: AuditCtx,
+    action: string,
+    objectId: string | null,
+    metadata: Record<string, unknown>,
+  ) {
+    await this.audit.log({
+      actorId: user.id,
+      action,
+      objectType: 'Schedule',
+      objectId,
+      result: AuditResult.SUCCESS,
+      metadata,
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+  }
+
+  /** GET /schedules — semua role boleh lihat (jam sesi global). */
+  async findAll(user: SessionUser) {
     const items = await this.prisma.schedule.findMany({
       orderBy: { session: 'asc' },
-    });
-    return { items, timezone: 'Asia/Jakarta' };
-  }
-
-  async update(
-    session: AttendanceSession,
-    dto: UpdateScheduleDto,
-    user: SessionUser,
-  ) {
-    if (user.role !== Role.ADMIN) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: 'Hanya Admin yang dapat mengubah jadwal.',
-      });
-    }
-
-    const start = parseHHMM(dto.mulai);
-    const end = parseHHMM(dto.selesai);
-    if (start >= end) {
-      throw new BadRequestException({
-        code: 'VALIDATION_ERROR',
-        message: 'Jam selesai harus setelah jam mulai.',
-      });
-    }
-
-    // Cek tumpang tindih dengan sesi lain
-    const existing = await this.prisma.schedule.findMany();
-    for (const other of existing) {
-      if (other.session === session) continue;
-      const otherStart = parseHHMM(other.mulai);
-      const otherEnd = parseHHMM(other.selesai);
-      if (start < otherEnd && end > otherStart) {
-        throw new BadRequestException({
-          code: 'VALIDATION_ERROR',
-          message: `Jadwal tumpang tindih dengan sesi ${other.session} (${other.mulai}–${other.selesai}).`,
-        });
-      }
-    }
-
-    return this.prisma.schedule.update({
-      where: { session },
-      data: {
-        mulai: dto.mulai,
-        selesai: dto.selesai,
-        updatedById: user.id,
+      include: {
+        updatedBy: { select: { id: true, nama: true, email: true } },
       },
     });
+    return { items, total: items.length, requesterRole: user.role };
   }
 
-  async toggleLock(session: AttendanceSession, user: SessionUser) {
-    if (user.role !== Role.ADMIN) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: 'Hanya Admin yang dapat mengubah status kunci.',
-      });
-    }
-
+  async findOne(id: string) {
     const schedule = await this.prisma.schedule.findUnique({
-      where: { session },
+      where: { id },
+      include: {
+        updatedBy: { select: { id: true, nama: true, email: true } },
+      },
     });
     if (!schedule) {
       throw new NotFoundException({
@@ -84,13 +62,77 @@ export class SchedulesService {
         message: 'Jadwal tidak ditemukan.',
       });
     }
+    return schedule;
+  }
 
-    return this.prisma.schedule.update({
-      where: { session },
+  /** PATCH /schedules/:id — hanya Admin. */
+  async update(id: string, dto: UpdateScheduleDto, user: SessionUser, ctx: AuditCtx = {}) {
+    if (user.role !== Role.ADMIN) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Hanya Admin yang dapat mengubah jadwal.',
+      });
+    }
+
+    const schedule = await this.prisma.schedule.findUnique({ where: { id } });
+    if (!schedule) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Jadwal tidak ditemukan.',
+      });
+    }
+
+    const updated = await this.prisma.schedule.update({
+      where: { id },
       data: {
-        terkunci: !schedule.terkunci,
+        ...(dto.mulai !== undefined ? { mulai: dto.mulai } : {}),
+        ...(dto.selesai !== undefined ? { selesai: dto.selesai } : {}),
+        ...(dto.terkunci !== undefined ? { terkunci: dto.terkunci } : {}),
         updatedById: user.id,
       },
     });
+
+    await this.log(user, ctx, 'schedule.update', id, {
+      session: schedule.session,
+      before: {
+        mulai: schedule.mulai,
+        selesai: schedule.selesai,
+        terkunci: schedule.terkunci,
+      },
+      changes: dto,
+    });
+
+    return updated;
+  }
+
+  /** POST /schedules/:id/toggle-lock — hanya Admin. */
+  async toggleLock(id: string, user: SessionUser, ctx: AuditCtx = {}) {
+    if (user.role !== Role.ADMIN) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Hanya Admin yang dapat mengunci jadwal.',
+      });
+    }
+
+    const schedule = await this.prisma.schedule.findUnique({ where: { id } });
+    if (!schedule) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Jadwal tidak ditemukan.',
+      });
+    }
+
+    const updated = await this.prisma.schedule.update({
+      where: { id },
+      data: { terkunci: !schedule.terkunci, updatedById: user.id },
+    });
+
+    await this.log(user, ctx, 'schedule.toggle_lock', id, {
+      session: schedule.session,
+      before: schedule.terkunci,
+      after: updated.terkunci,
+    });
+
+    return updated;
   }
 }

@@ -1,14 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Put,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -32,10 +22,7 @@ export class AttendanceController {
 
   @Get()
   @ApiOperation({ summary: 'Baca presensi kelas pada tanggal tertentu' })
-  findByClass(
-    @Query() query: QueryAttendanceDto,
-    @CurrentUser() user: SessionUser,
-  ) {
+  findByClass(@Query() query: QueryAttendanceDto, @CurrentUser() user: SessionUser) {
     return this.attendanceService.findByClassAndDate(query, user);
   }
 
@@ -43,10 +30,7 @@ export class AttendanceController {
   @ApiOperation({
     summary: 'Riwayat harian per kelas (Ketua Kelas: kelasnya, Guru Piket/Admin: semua)',
   })
-  getHistory(
-    @Query() query: QueryHistoryDto,
-    @CurrentUser() user: SessionUser,
-  ) {
+  getHistory(@Query() query: QueryHistoryDto, @CurrentUser() user: SessionUser) {
     return this.historyService.getHistory(query, user);
   }
 

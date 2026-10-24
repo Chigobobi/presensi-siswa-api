@@ -1,37 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { SessionUser } from '../../common/types/session-user.type';
+import { parseDateKey } from '../../common/utils/date-key';
 import { QueryClassDetailDto, QueryMonitoringDto } from './dto/query-monitoring.dto';
-
-function parseDateKey(date: string): Date {
-  if (typeof date !== 'string' || !date.trim()) {
-    throw new BadRequestException({
-      code: 'VALIDATION_ERROR',
-      message: 'Tanggal wajib diisi.',
-    });
-  }
-
-  // Normalisasi: trim, koma → strip, unicode
-  const normalized = date.trim().replace(/,/g, '-').normalize('NFKC');
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    throw new BadRequestException({
-      code: 'VALIDATION_ERROR',
-      message: `Tanggal "${date}" tidak valid. Format: YYYY-MM-DD (contoh: 2026-10-16).`,
-    });
-  }
-
-  const d = new Date(`${normalized}T00:00:00.000Z`);
-  if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== normalized) {
-    throw new BadRequestException({
-      code: 'VALIDATION_ERROR',
-      message: `Tanggal "${date}" bukan tanggal kalender yang valid.`,
-    });
-  }
-
-  return d;
-}
 
 function todayJakarta(): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -57,38 +29,38 @@ export class MonitoringService {
     }
   }
 
-  /** Ringkasan semua kelas pada tanggal tertentu */
   async overview(query: QueryMonitoringDto, user: SessionUser) {
     this.assertCanMonitor(user);
     const dateObj = parseDateKey(query.date);
 
-    // Ambil semua kelas aktif
     const classes = await this.prisma.class.findMany({
       where: { status: 'active' },
       orderBy: { nama: 'asc' },
       select: { id: true, nama: true, jurusan: true },
     });
 
-    // Ambil jumlah siswa aktif per kelas
     const studentCounts = await this.prisma.student.groupBy({
       by: ['kelasId'],
       where: { status: 'active' },
       _count: { _all: true },
     });
-    const studentCountByClass = new Map(
-      studentCounts.map((s) => [s.kelasId, s._count._all]),
-    );
+    const studentCountByClass = new Map(studentCounts.map((s) => [s.kelasId, s._count._all]));
 
-    // Ambil semua presensi untuk tanggal ini
     const attendances = await this.prisma.attendance.findMany({
       where: { date: dateObj },
       select: { kelasId: true, studentId: true, status: true },
     });
 
-    // Group by kelas
     const byClass = new Map<
       string,
-      { hadir: number; terlambat: number; izin: number; sakit: number; alpa: number; total: number }
+      {
+        hadir: number;
+        terlambat: number;
+        izin: number;
+        sakit: number;
+        alpa: number;
+        total: number;
+      }
     >();
     for (const a of attendances) {
       const c = byClass.get(a.kelasId) ?? {
@@ -101,7 +73,7 @@ export class MonitoringService {
       };
       if (a.status === 'HADIR') c.hadir++;
       else if (a.status === 'TERLAMBAT') {
-        c.hadir++; // Hadir mencakup Terlambat
+        c.hadir++;
         c.terlambat++;
       } else if (a.status === 'IZIN') c.izin++;
       else if (a.status === 'SAKIT') c.sakit++;
@@ -139,7 +111,6 @@ export class MonitoringService {
       };
     });
 
-    // Total keseluruhan
     const totals = items.reduce(
       (acc, it) => {
         acc.siswa += it.siswa;
@@ -151,7 +122,15 @@ export class MonitoringService {
         acc.belum += it.belum;
         return acc;
       },
-      { siswa: 0, hadir: 0, terlambat: 0, izin: 0, sakit: 0, alpa: 0, belum: 0 },
+      {
+        siswa: 0,
+        hadir: 0,
+        terlambat: 0,
+        izin: 0,
+        sakit: 0,
+        alpa: 0,
+        belum: 0,
+      },
     );
 
     return {
@@ -162,13 +141,7 @@ export class MonitoringService {
     };
   }
 
-  /** Detail 1 kelas: daftar siswa + status presensi */
-  async classDetail(
-    classId: string,
-    query: QueryClassDetailDto,
-    user: SessionUser,
-  ) {
-    // Scope Ketua Kelas
+  async classDetail(classId: string, query: QueryClassDetailDto, user: SessionUser) {
     if (user.role === Role.KETUA_KELAS) {
       if (!user.kelasId) {
         throw new ForbiddenException({
@@ -220,9 +193,7 @@ export class MonitoringService {
       };
     });
 
-    const hadir = records.filter(
-      (r) => r.status === 'HADIR' || r.status === 'TERLAMBAT',
-    ).length;
+    const hadir = records.filter((r) => r.status === 'HADIR' || r.status === 'TERLAMBAT').length;
     const terlambat = records.filter((r) => r.status === 'TERLAMBAT').length;
     const izin = records.filter((r) => r.status === 'IZIN').length;
     const sakit = records.filter((r) => r.status === 'SAKIT').length;
@@ -240,10 +211,7 @@ export class MonitoringService {
         sakit,
         alpa,
         belum,
-        persentase:
-          students.length > 0
-            ? Math.round((hadir / students.length) * 100)
-            : 0,
+        persentase: students.length > 0 ? Math.round((hadir / students.length) * 100) : 0,
       },
       records,
       note: 'Hadir termasuk Terlambat.',

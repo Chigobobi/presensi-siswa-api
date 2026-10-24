@@ -8,19 +8,9 @@ import {
 import { Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { SessionUser } from '../../common/types/session-user.type';
+import { parseDateKey } from '../../common/utils/date-key';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { QueryPermissionDto } from './dto/query-permission.dto';
-
-function parseDateKey(date: string): Date {
-  const d = new Date(`${date}T00:00:00.000Z`);
-  if (isNaN(d.getTime())) {
-    throw new BadRequestException({
-      code: 'VALIDATION_ERROR',
-      message: 'Tanggal tidak valid.',
-    });
-  }
-  return d;
-}
 
 @Injectable()
 export class AttendancePermissionsService {
@@ -36,7 +26,6 @@ export class AttendancePermissionsService {
 
     const dateObj = parseDateKey(dto.date);
 
-    // Cari siswa
     const student = await this.prisma.student.findUnique({
       where: { nis: dto.nis },
     });
@@ -59,7 +48,6 @@ export class AttendancePermissionsService {
       });
     }
 
-    // Cek duplikat (unique constraint di DB)
     const existing = await this.prisma.attendancePermission.findUnique({
       where: {
         date_kelasId_studentId: {
@@ -96,7 +84,6 @@ export class AttendancePermissionsService {
   }
 
   async findAll(query: QueryPermissionDto, user: SessionUser) {
-    // Scope Ketua Kelas
     let kelasId = query.kelasId;
     if (user.role === Role.KETUA_KELAS) {
       if (!user.kelasId) {
@@ -168,17 +155,7 @@ export class AttendancePermissionsService {
     return { deleted: true, id };
   }
 
-  /**
-   * Cek apakah siswa punya izin aktif (belum dipakai) untuk kelas/tanggal.
-   * Kalau ada, langsung konsumsi (set usedAt + usedById) dalam transaksi.
-   * Return: izin yang dikonsumsi atau null.
-   */
-  async consumeIfExists(
-    kelasId: string,
-    studentId: string,
-    dateObj: Date,
-    userId: string,
-  ) {
+  async consumeIfExists(kelasId: string, studentId: string, dateObj: Date, userId: string) {
     const perm = await this.prisma.attendancePermission.findUnique({
       where: {
         date_kelasId_studentId: { date: dateObj, kelasId, studentId },

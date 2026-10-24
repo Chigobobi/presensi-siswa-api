@@ -16,6 +16,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ReqContext, type RequestContext } from '../../common/decorators/request-context.decorator';
 import type { SessionUser } from '../../common/types/session-user.type';
 
 @ApiTags('Auth')
@@ -29,6 +30,7 @@ export class AuthController {
   async login(
     @Body() dto: LoginDto,
     @Req() req: Request,
+    @ReqContext() ctx: RequestContext,
     @Res({ passthrough: true }) res: Response,
   ): Promise<SessionUser> {
     const userAgent = req.headers['user-agent'];
@@ -38,6 +40,7 @@ export class AuthController {
       dto,
       userAgent,
       ipAddress,
+      ctx.requestId ?? undefined,
     );
 
     const cookieName = process.env.SESSION_COOKIE_NAME ?? 'presensi_session';
@@ -57,17 +60,26 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(AuthGuard)
   @ApiOperation({ summary: 'Logout (hapus sesi)' })
   async logout(
     @Req() req: Request,
+    @ReqContext() ctx: RequestContext,
+    @CurrentUser() user: SessionUser | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const cookieName = process.env.SESSION_COOKIE_NAME ?? 'presensi_session';
     const cookies = req.cookies as Record<string, string> | undefined;
     const token = cookies?.[cookieName];
 
-    if (token) {
-      await this.authService.logout(token);
+    if (token && user) {
+      await this.authService.logout(
+        token,
+        user.id,
+        ctx.requestId ?? undefined,
+        ctx.ipAddress ?? undefined,
+        ctx.userAgent ?? undefined,
+      );
     }
 
     res.clearCookie(cookieName, { path: '/' });

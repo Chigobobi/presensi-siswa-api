@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, Matches } from 'class-validator';
+import { IsNotEmpty, IsString } from 'class-validator';
 
 export class CreatePermissionDto {
   @ApiProperty({ example: 'cls_xxxxx' })
@@ -13,8 +13,7 @@ export class CreatePermissionDto {
   nis!: string;
 
   @ApiProperty({ example: '2026-10-16', description: 'Format YYYY-MM-DD' })
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'Tanggal harus format YYYY-MM-DD.',
-  })
+  @IsString()
+  @IsNotEmpty()
   date!: string;
 }

@@ -14,6 +14,7 @@ import {
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ReqContext, type RequestContext } from '../../common/decorators/request-context.decorator';
 import type { SessionUser } from '../../common/types/session-user.type';
 import { ClassesService } from './classes.service';
 import { CreateClassDto } from './dto/create-class.dto';
@@ -42,8 +43,12 @@ export class ClassesController {
 
   @Post()
   @ApiOperation({ summary: 'Tambah kelas (Admin)' })
-  create(@Body() dto: CreateClassDto, @CurrentUser() user: SessionUser) {
-    return this.classesService.create(dto, user);
+  create(
+    @Body() dto: CreateClassDto,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.classesService.create(dto, user, ctx);
   }
 
   @Patch(':id')
@@ -52,8 +57,9 @@ export class ClassesController {
     @Param('id') id: string,
     @Body() dto: UpdateClassDto,
     @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
   ) {
-    return this.classesService.update(id, dto, user);
+    return this.classesService.update(id, dto, user, ctx);
   }
 
   @Post(':id/leader')
@@ -63,33 +69,50 @@ export class ClassesController {
     @Param('id') id: string,
     @Body() dto: AssignLeaderDto,
     @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
   ) {
-    return this.classesService.assignLeader(id, dto, user);
+    return this.classesService.assignLeader(id, dto, user, ctx);
   }
 
   @Delete(':id/leader')
   @ApiOperation({ summary: 'Lepas Ketua Kelas (Admin)' })
-  removeLeader(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.classesService.removeLeader(id, user);
+  removeLeader(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.classesService.removeLeader(id, user, ctx);
   }
 
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Nonaktifkan kelas (Admin)' })
-  deactivate(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.classesService.setActive(id, false, user);
+  deactivate(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.classesService.setActive(id, false, user, ctx);
   }
 
   @Post(':id/activate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Aktifkan kelas (Admin)' })
-  activate(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.classesService.setActive(id, true, user);
+  activate(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.classesService.setActive(id, true, user, ctx);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Hapus kelas permanen (Admin)' })
-  remove(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    return this.classesService.remove(id, user);
+  remove(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @ReqContext() ctx: RequestContext,
+  ) {
+    return this.classesService.remove(id, user, ctx);
   }
 }

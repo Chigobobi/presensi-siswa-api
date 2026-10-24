@@ -1,13 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Post,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -21,9 +12,7 @@ import { QueryPermissionDto } from './dto/query-permission.dto';
 @UseGuards(AuthGuard)
 @Controller('attendance/permissions')
 export class AttendancePermissionsController {
-  constructor(
-    private readonly permissionsService: AttendancePermissionsService,
-  ) {}
+  constructor(private readonly permissionsService: AttendancePermissionsService) {}
 
   @Post()
   @ApiOperation({ summary: 'Beri izin Hadir/Terlambat luar jadwal (Guru Piket/Admin)' })
@@ -33,10 +22,7 @@ export class AttendancePermissionsController {
 
   @Get()
   @ApiOperation({ summary: 'List izin (scope role)' })
-  findAll(
-    @Query() query: QueryPermissionDto,
-    @CurrentUser() user: SessionUser,
-  ) {
+  findAll(@Query() query: QueryPermissionDto, @CurrentUser() user: SessionUser) {
     return this.permissionsService.findAll(query, user);
   }
 

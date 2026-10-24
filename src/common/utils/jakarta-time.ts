@@ -45,11 +45,7 @@ export function parseHHMM(hhmm: string): number {
 }
 
 /** Apakah `now` dalam rentang [mulai, selesai) */
-export function isWithinRange(
-  nowMinutes: number,
-  mulai: string,
-  selesai: string,
-): boolean {
+export function isWithinRange(nowMinutes: number, mulai: string, selesai: string): boolean {
   const start = parseHHMM(mulai);
   const end = parseHHMM(selesai);
   return nowMinutes >= start && nowMinutes < end;

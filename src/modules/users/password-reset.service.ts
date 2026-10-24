@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -18,9 +13,7 @@ export class PasswordResetService {
    * Admin minta reset. Generate token, simpan hash, "kirim" ke user.
    * Di dev: log token ke console. Di prod: kirim via email.
    */
-  async requestReset(
-    userId: string,
-  ): Promise<{ accepted: true; devToken?: string }> {
+  async requestReset(userId: string): Promise<{ accepted: true; devToken?: string }> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException({
@@ -48,9 +41,7 @@ export class PasswordResetService {
     });
 
     // TODO prod: kirim via email
-    this.logger.warn(
-      `[DEV] Password reset token untuk ${user.email}: ${rawToken}`,
-    );
+    this.logger.warn(`[DEV] Password reset token untuk ${user.email}: ${rawToken}`);
     this.logger.warn(
       `[DEV] Konfirmasi via: POST /api/v1/auth/password-reset/confirm { "token": "${rawToken}", "newPassword": "..." }`,
     );
@@ -117,8 +108,6 @@ export class PasswordResetService {
       this.prisma.session.deleteMany({ where: { userId: token.userId } }),
     ]);
 
-    this.logger.log(
-      `Password reset berhasil untuk ${token.user.email}. Semua sesi dihapus.`,
-    );
+    this.logger.log(`Password reset berhasil untuk ${token.user.email}. Semua sesi dihapus.`);
   }
 }

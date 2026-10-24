@@ -4,16 +4,26 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ActiveStatus, Role } from '@prisma/client';
+import { ActiveStatus, AuditResult, Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { SessionUser } from '../../common/types/session-user.type';
+import { AuditService } from '../audit/audit.service';
 import { CreateTeacherDto } from './dto/create-teacher.dto';
 import { UpdateTeacherDto } from './dto/update-teacher.dto';
 import { QueryTeacherDto } from './dto/query-teacher.dto';
 
+interface AuditCtx {
+  requestId?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
 @Injectable()
 export class TeachersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   private assertAdmin(user: SessionUser) {
     if (user.role !== Role.ADMIN) {
@@ -51,33 +61,22 @@ export class TeachersService {
       }),
     ]);
 
-    return {
-      items,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findOne(id: string, user: SessionUser) {
     this.assertAdmin(user);
     const teacher = await this.prisma.teacher.findUnique({ where: { id } });
     if (!teacher) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Guru tidak ditemukan.',
-      });
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Guru tidak ditemukan.' });
     }
     return teacher;
   }
 
-  async create(dto: CreateTeacherDto, user: SessionUser) {
+  async create(dto: CreateTeacherDto, user: SessionUser, ctx: AuditCtx = {}) {
     this.assertAdmin(user);
 
-    const existing = await this.prisma.teacher.findUnique({
-      where: { nip: dto.nip },
-    });
+    const existing = await this.prisma.teacher.findUnique({ where: { nip: dto.nip } });
     if (existing) {
       throw new ConflictException({
         code: 'CONFLICT',
@@ -86,30 +85,33 @@ export class TeachersService {
       });
     }
 
-    return this.prisma.teacher.create({
-      data: {
-        nip: dto.nip,
-        nama: dto.nama,
-        status: ActiveStatus.active,
-      },
+    const teacher = await this.prisma.teacher.create({
+      data: { nip: dto.nip, nama: dto.nama, status: ActiveStatus.active },
     });
+
+    await this.audit.log({
+      actorId: user.id,
+      action: 'teacher.create',
+      objectType: 'Teacher',
+      objectId: teacher.id,
+      result: AuditResult.SUCCESS,
+      metadata: { nip: teacher.nip, nama: teacher.nama },
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+
+    return teacher;
   }
 
-  async update(id: string, dto: UpdateTeacherDto, user: SessionUser) {
+  async update(id: string, dto: UpdateTeacherDto, user: SessionUser, ctx: AuditCtx = {}) {
     this.assertAdmin(user);
-
     const teacher = await this.prisma.teacher.findUnique({ where: { id } });
     if (!teacher) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Guru tidak ditemukan.',
-      });
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Guru tidak ditemukan.' });
     }
-
     if (dto.nip && dto.nip !== teacher.nip) {
-      const dup = await this.prisma.teacher.findUnique({
-        where: { nip: dto.nip },
-      });
+      const dup = await this.prisma.teacher.findUnique({ where: { nip: dto.nip } });
       if (dup) {
         throw new ConflictException({
           code: 'CONFLICT',
@@ -118,42 +120,63 @@ export class TeachersService {
         });
       }
     }
-
-    return this.prisma.teacher.update({
-      where: { id },
-      data: dto,
+    const updated = await this.prisma.teacher.update({ where: { id }, data: dto });
+    await this.audit.log({
+      actorId: user.id,
+      action: 'teacher.update',
+      objectType: 'Teacher',
+      objectId: id,
+      result: AuditResult.SUCCESS,
+      metadata: { changes: dto, before: { nip: teacher.nip, nama: teacher.nama } },
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
     });
+    return updated;
   }
 
-  async setActive(id: string, active: boolean, user: SessionUser) {
+  async setActive(id: string, active: boolean, user: SessionUser, ctx: AuditCtx = {}) {
     this.assertAdmin(user);
-
     const teacher = await this.prisma.teacher.findUnique({ where: { id } });
     if (!teacher) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Guru tidak ditemukan.',
-      });
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Guru tidak ditemukan.' });
     }
-
-    return this.prisma.teacher.update({
+    const updated = await this.prisma.teacher.update({
       where: { id },
       data: { status: active ? ActiveStatus.active : ActiveStatus.inactive },
     });
+    await this.audit.log({
+      actorId: user.id,
+      action: active ? 'teacher.activate' : 'teacher.deactivate',
+      objectType: 'Teacher',
+      objectId: id,
+      result: AuditResult.SUCCESS,
+      metadata: { nip: teacher.nip, nama: teacher.nama },
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
+    return updated;
   }
 
-  async remove(id: string, user: SessionUser) {
+  async remove(id: string, user: SessionUser, ctx: AuditCtx = {}) {
     this.assertAdmin(user);
-
     const teacher = await this.prisma.teacher.findUnique({ where: { id } });
     if (!teacher) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Guru tidak ditemukan.',
-      });
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Guru tidak ditemukan.' });
     }
-
     await this.prisma.teacher.delete({ where: { id } });
+    await this.audit.log({
+      actorId: user.id,
+      action: 'teacher.delete',
+      objectType: 'Teacher',
+      objectId: id,
+      result: AuditResult.SUCCESS,
+      metadata: { nip: teacher.nip, nama: teacher.nama },
+      requestId: ctx.requestId ?? null,
+      ipAddress: ctx.ipAddress ?? null,
+      userAgent: ctx.userAgent ?? null,
+    });
     return { deleted: true, id };
   }
 }

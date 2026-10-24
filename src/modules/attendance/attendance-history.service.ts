@@ -5,23 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
+import { parseDateKey } from 'src/common/utils/date-key';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { SessionUser } from '../../common/types/session-user.type';
 import { QueryHistoryDto } from './dto/query-history.dto';
 
 const DAY_MS = 86_400_000;
 const MAX_DAYS = 366;
-
-function parseDateKey(date: string): Date {
-  const d = new Date(`${date}T00:00:00.000Z`);
-  if (isNaN(d.getTime())) {
-    throw new BadRequestException({
-      code: 'VALIDATION_ERROR',
-      message: 'Tanggal tidak valid.',
-    });
-  }
-  return d;
-}
 
 @Injectable()
 export class AttendanceHistoryService {
@@ -123,9 +113,7 @@ export class AttendanceHistoryService {
         alpa: counts.alpa,
         filled: counts.total,
         persentase:
-          activeStudentCount > 0
-            ? Math.round((counts.hadir / activeStudentCount) * 100)
-            : 0,
+          activeStudentCount > 0 ? Math.round((counts.hadir / activeStudentCount) * 100) : 0,
       }))
       .sort((a, b) => b.date.localeCompare(a.date));
 
