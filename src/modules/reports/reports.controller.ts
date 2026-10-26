@@ -1,19 +1,9 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import {
-  ReqContext,
-  type RequestContext,
-} from '../../common/decorators/request-context.decorator';
+import { ReqContext, type RequestContext } from '../../common/decorators/request-context.decorator';
 import type { SessionUser } from '../../common/types/session-user.type';
 import { ReportsService } from './reports.service';
 import { QueryReportDto } from './dto/query-report.dto';
@@ -57,8 +47,7 @@ export class ReportsController {
 
   @Get('attendance/export')
   @ApiOperation({
-    summary:
-      'Export CSV rekap kelas (scope role). Header + data + footer TOTAL.',
+    summary: 'Export CSV rekap kelas (scope role). Header + data + footer TOTAL.',
   })
   async export(
     @Query() query: QueryReportDto,
@@ -69,10 +58,7 @@ export class ReportsController {
     const result = await this.reportsService.exportCsv(query, user, ctx);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${result.filename}"`,
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
     res.setHeader('X-Request-Id', ctx.requestId ?? '');
     res.send(result.csv);
   }

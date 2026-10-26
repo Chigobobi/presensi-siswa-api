@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import { IsBoolean, IsOptional, IsString, Matches } from 'class-validator';
 
 export class UpdateScheduleDto {
@@ -12,6 +13,7 @@ export class UpdateScheduleDto {
   selesai?: string;
 
   @IsOptional()
+  @Type(() => Boolean)
   @IsBoolean()
   terkunci?: boolean;
 }

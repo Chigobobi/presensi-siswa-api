@@ -53,7 +53,11 @@ export function buildCsv<T>(
       }
       return merged as T;
     }, {} as T);
-    lines.push(footer(totals).map((v) => escapeCsvField(v)).join(','));
+    lines.push(
+      footer(totals)
+        .map((v) => escapeCsvField(v))
+        .join(','),
+    );
   }
 
   return lines.join('\r\n');

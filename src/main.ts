@@ -42,13 +42,17 @@ async function bootstrap() {
   });
 
   // Global validation pipe
+  // CATATAN: enableImplicitConversion dihapus karena bug di class-validator:
+  //   field string yang pakai @Matches bisa terkonversi jadi non-string
+  //   sebelum @Matches jalan → validasi format gagal palsu.
+  // Semua DTO yang butuh konversi sudah pakai @Type(() => Number) eksplisit.
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
       transformOptions: {
-        enableImplicitConversion: true,
+        enableImplicitConversion: false,
       },
     }),
   );
@@ -69,6 +73,8 @@ async function bootstrap() {
       .addTag('Schedules', 'Jadwal sesi presensi')
       .addTag('Monitoring', 'Monitoring kelas')
       .addTag('Reports', 'Laporan & rekap')
+      .addTag('Sick Letters', 'Surat sakit siswa')
+      .addTag('Stats', 'Statistik kehadiran')
       .addTag('Audit', 'Log aktivitas')
       .addTag('Health', 'Health check')
       .build();
