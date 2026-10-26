@@ -18,6 +18,8 @@ import { SchedulesModule } from './modules/schedules/schedules.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { SickLettersModule } from './modules/sick-letters/sick-letters.module';
+import { StatsModule } from './modules/stats/stats.module';
 
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
@@ -46,6 +48,8 @@ import { RolesGuard } from './common/guards/roles.guard';
     MonitoringModule,
     ReportsModule,
     AuditModule,
+    SickLettersModule,
+    StatsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

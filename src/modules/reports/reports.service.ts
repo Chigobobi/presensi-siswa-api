@@ -6,12 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { parseDateKey } from '../../common/utils/date-key';
-import {
-  ActiveStatus,
-  AttendanceStatus,
-  AuditResult,
-  Role,
-} from '@prisma/client';
+import { ActiveStatus, AttendanceStatus, AuditResult, Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { SessionUser } from '../../common/types/session-user.type';
 import { AuditService } from '../audit/audit.service';
@@ -27,10 +22,7 @@ interface AuditCtx {
   userAgent?: string | null;
 }
 
-const STATUS_KEY: Record<
-  AttendanceStatus,
-  'hadir' | 'terlambat' | 'izin' | 'sakit' | 'alpa'
-> = {
+const STATUS_KEY: Record<AttendanceStatus, 'hadir' | 'terlambat' | 'izin' | 'sakit' | 'alpa'> = {
   HADIR: 'hadir',
   TERLAMBAT: 'terlambat',
   IZIN: 'izin',
@@ -92,8 +84,7 @@ export class ReportsService {
       });
     }
 
-    const totalDays =
-      Math.floor((to.getTime() - from.getTime()) / 86_400_000) + 1;
+    const totalDays = Math.floor((to.getTime() - from.getTime()) / 86_400_000) + 1;
     if (totalDays > 366) {
       throw new BadRequestException({
         code: 'VALIDATION_ERROR',
@@ -153,28 +144,20 @@ export class ReportsService {
           izin: c.izin,
           sakit: c.sakit,
           alpa: c.alpa,
-          persentase:
-            effectiveDays > 0
-              ? Math.round((c.hadir / effectiveDays) * 100)
-              : 0,
+          persentase: effectiveDays > 0 ? Math.round((c.hadir / effectiveDays) * 100) : 0,
         };
       });
 
-    const filtered = query.status
-      ? rows.filter((r) => r[STATUS_KEY[query.status!]] > 0)
-      : rows;
+    const filtered = query.status ? rows.filter((r) => r[STATUS_KEY[query.status!]] > 0) : rows;
 
-    const totals = filtered.reduce(
-      (acc, r) => {
-        acc.hadir += r.hadir;
-        acc.terlambat += r.terlambat;
-        acc.izin += r.izin;
-        acc.sakit += r.sakit;
-        acc.alpa += r.alpa;
-        return acc;
-      },
-      emptyCounter(),
-    );
+    const totals = filtered.reduce((acc, r) => {
+      acc.hadir += r.hadir;
+      acc.terlambat += r.terlambat;
+      acc.izin += r.izin;
+      acc.sakit += r.sakit;
+      acc.alpa += r.alpa;
+      return acc;
+    }, emptyCounter());
 
     return {
       kelas: { id: kelas.id, nama: kelas.nama, jurusan: kelas.jurusan },
@@ -209,8 +192,7 @@ export class ReportsService {
       });
     }
 
-    const totalDays =
-      Math.floor((to.getTime() - from.getTime()) / 86_400_000) + 1;
+    const totalDays = Math.floor((to.getTime() - from.getTime()) / 86_400_000) + 1;
     if (totalDays > 366) {
       throw new BadRequestException({
         code: 'VALIDATION_ERROR',
@@ -298,11 +280,7 @@ export class ReportsService {
   // ============================================================
   // ENDPOINT BARU: studentReport (rekap per siswa lintas kelas)
   // ============================================================
-  async studentReport(
-    studentId: string,
-    query: QueryStudentReportDto,
-    user: SessionUser,
-  ) {
+  async studentReport(studentId: string, query: QueryStudentReportDto, user: SessionUser) {
     const from = parseDateKey(query.from);
     const to = parseDateKey(query.to);
 
@@ -313,8 +291,7 @@ export class ReportsService {
       });
     }
 
-    const totalDays =
-      Math.floor((to.getTime() - from.getTime()) / 86_400_000) + 1;
+    const totalDays = Math.floor((to.getTime() - from.getTime()) / 86_400_000) + 1;
     if (totalDays > 366) {
       throw new BadRequestException({
         code: 'VALIDATION_ERROR',
@@ -422,10 +399,7 @@ export class ReportsService {
       effectiveDays,
       total: {
         ...total,
-        persentase:
-          effectiveDays > 0
-            ? Math.round((total.hadir / effectiveDays) * 100)
-            : 0,
+        persentase: effectiveDays > 0 ? Math.round((total.hadir / effectiveDays) * 100) : 0,
       },
       perKelas,
       note: 'Hadir termasuk Terlambat. Persentase = hadir / hari efektif.',
@@ -467,9 +441,7 @@ export class ReportsService {
 
     const csv = buildCsv(columns, report.rows, footer);
 
-    const safeKelas = report.kelas.nama
-      .replace(/[^a-zA-Z0-9-_]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+    const safeKelas = report.kelas.nama.replace(/[^a-zA-Z0-9-_]+/g, '-').replace(/^-+|-+$/g, '');
     const filename = `rekap-${safeKelas}-${report.from}_${report.to}.csv`;
 
     // Audit export (data keluar dari sistem)
